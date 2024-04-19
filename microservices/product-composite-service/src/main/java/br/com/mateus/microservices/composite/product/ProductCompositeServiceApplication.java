@@ -53,7 +53,6 @@ public class ProductCompositeServiceApplication {
 						.url(apiExternalDocUrl));
 	}
 
-
 	@Bean
 	RestTemplate restTemplate() {
 		return new RestTemplate();

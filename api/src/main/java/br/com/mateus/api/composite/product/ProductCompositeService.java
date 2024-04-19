@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 @Tag(name = "ProductComposite", description = "REST API for composite product information.")
 public interface ProductCompositeService {
 
-
   /**
    * Sample usage: "curl $HOST:$PORT/product-composite/1".
    *
@@ -31,6 +30,4 @@ public interface ProductCompositeService {
           value = "/product-composite/{productId}",
           produces = "application/json")
   ProductAggregate getProduct(@PathVariable int productId);
-
-
 }
