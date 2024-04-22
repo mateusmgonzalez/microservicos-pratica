@@ -4,7 +4,7 @@ plugins {
 	id 'io.spring.dependency-management' version '1.1.4'
 }
 
-group = 'se.magnus.microservices.core.review'
+group = 'br.com.mateus.microservices.core.review'
 version = '1.0.0-SNAPSHOT'
 
 java {
@@ -15,18 +15,31 @@ repositories {
 	mavenCentral()
 }
 
+
+ext {
+	mapstructVersion = '1.5.5.Final'
+}
+
 dependencies {
 	implementation project(':api')
 	implementation project(':util')
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
-	// To avoid the following error message on Apple silicon (for details, see https://github.com/netty/netty/issues/11693):
-	// Unable to load io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider, fallback to system defaults. This may result in incorrect DNS resolutions on MacOS.
-	implementation group: 'io.netty', name: 'netty-resolver-dns-native-macos', classifier: 'osx-aarch_64'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation "org.mapstruct:mapstruct:${mapstructVersion}"
+
+	compileOnly "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+	annotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+
+	testAnnotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'io.projectreactor:reactor-test'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	implementation 'com.mysql:mysql-connector-j'
+	testImplementation 'org.testcontainers:mysql'
 }
 
 tasks.named('test') {

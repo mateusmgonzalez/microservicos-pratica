@@ -4,7 +4,6 @@
 #
 #   HOST=localhost PORT=7000 ./test-em-all.bash
 #
-# shellcheck disable=SC2223
 : ${HOST=localhost}
 : ${PORT=8080}
 : ${PROD_ID_REVS_RECS=1}
@@ -16,8 +15,7 @@ function assertCurl() {
 
   local expectedHttpCode=$1
   local curlCmd="$2 -w \"%{http_code}\""
-  # shellcheck disable=SC2155
-  local result=$(eval "$curlCmd")
+  local result=$(eval $curlCmd)
   local httpCode="${result:(-3)}"
   RESPONSE='' && (( ${#result} > 3 )) && RESPONSE="${result%???}"
 
@@ -62,11 +60,10 @@ function testUrl() {
 }
 
 function waitForService() {
-  # shellcheck disable=SC2124
   url=$@
   echo -n "Wait for: $url... "
   n=0
-  until testUrl "$url"
+  until testUrl $url
   do
     n=$((n + 1))
     if [[ $n == 100 ]]
@@ -81,16 +78,101 @@ function waitForService() {
   echo "DONE, continues..."
 }
 
+function testCompositeCreated() {
+
+    # Expect that the Product Composite for productId $PROD_ID_REVS_RECS has been created with three recommendations and three reviews
+    if ! assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+    then
+        echo -n "FAIL"
+        return 1
+    fi
+
+    set +e
+    assertEqual "$PROD_ID_REVS_RECS" $(echo $RESPONSE | jq .productId)
+    if [ "$?" -eq "1" ] ; then return 1; fi
+
+    assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+    if [ "$?" -eq "1" ] ; then return 1; fi
+
+    assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+    if [ "$?" -eq "1" ] ; then return 1; fi
+
+    set -e
+}
+
+function waitForMessageProcessing() {
+    echo "Wait for messages to be processed... "
+
+    # Give background processing some time to complete...
+    sleep 1
+
+    n=0
+    until testCompositeCreated
+    do
+        n=$((n + 1))
+        if [[ $n == 40 ]]
+        then
+            echo " Give up"
+            exit 1
+        else
+            sleep 6
+            echo -n ", retry #$n "
+        fi
+    done
+    echo "All messages are now processed!"
+}
+
+function recreateComposite() {
+  local productId=$1
+  local composite=$2
+
+  assertCurl 202 "curl -X DELETE http://$HOST:$PORT/product-composite/${productId} -s"
+  assertEqual 202 $(curl -X POST -s http://$HOST:$PORT/product-composite -H "Content-Type: application/json" --data "$composite" -w "%{http_code}")
+}
+
+function setupTestdata() {
+
+  body="{\"productId\":$PROD_ID_NO_RECS"
+  body+=\
+',"name":"product name A","weight":100, "reviews":[
+  {"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},
+  {"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},
+  {"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}
+]}'
+  recreateComposite "$PROD_ID_NO_RECS" "$body"
+
+  body="{\"productId\":$PROD_ID_NO_REVS"
+  body+=\
+',"name":"product name B","weight":200, "recommendations":[
+  {"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},
+  {"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},
+  {"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}
+]}'
+  recreateComposite "$PROD_ID_NO_REVS" "$body"
+
+
+  body="{\"productId\":$PROD_ID_REVS_RECS"
+  body+=\
+',"name":"product name C","weight":300, "recommendations":[
+      {"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},
+      {"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},
+      {"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}
+  ], "reviews":[
+      {"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},
+      {"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},
+      {"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}
+  ]}'
+  recreateComposite "$PROD_ID_REVS_RECS" "$body"
+
+}
+
 set -e
 
-# shellcheck disable=SC2046
-# shellcheck disable=SC2006
 echo "Start Tests:" `date`
 
 echo "HOST=${HOST}"
 echo "PORT=${PORT}"
 
-# shellcheck disable=SC2199
 if [[ $@ == *"start"* ]]
 then
   echo "Restarting the test environment..."
@@ -100,7 +182,10 @@ then
   docker compose up -d
 fi
 
-waitForService curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS
+waitForService curl http://$HOST:$PORT/actuator/health
+setupTestdata
+
+waitForMessageProcessing
 
 # Verify that a normal request works, expect three recommendations and three reviews
 assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
@@ -131,6 +216,16 @@ assertEqual "\"Invalid productId: -1\"" "$(echo $RESPONSE | jq .message)"
 # Verify that a 400 (Bad Request) error error is returned for a productId that is not a number, i.e. invalid format
 assertCurl 400 "curl http://$HOST:$PORT/product-composite/invalidProductId -s"
 assertEqual "\"Type mismatch.\"" "$(echo $RESPONSE | jq .message)"
+
+# Verify access to Swagger and OpenAPI URLs
+echo "Swagger/OpenAPI tests"
+assertCurl 302 "curl -s  http://$HOST:$PORT/openapi/swagger-ui.html"
+assertCurl 200 "curl -sL http://$HOST:$PORT/openapi/swagger-ui.html"
+assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/webjars/swagger-ui/index.html?configUrl=/v3/api-docs/swagger-config"
+assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/v3/api-docs"
+assertEqual "3.0.1" "$(echo $RESPONSE | jq -r .openapi)"
+assertEqual "http://$HOST:$PORT" "$(echo $RESPONSE | jq -r '.servers[0].url')"
+assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/v3/api-docs.yaml"
 
 if [[ $@ == *"stop"* ]]
 then
